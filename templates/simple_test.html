@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple IPAM Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto p-6">
+        <h1 class="text-2xl font-bold mb-6">IP Management Test</h1>
+        
+        <!-- Quick Stats -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold" id="total-subnets">-</div>
+                <div class="text-sm text-gray-600">Total Subnets</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold" id="total-interfaces">-</div>
+                <div class="text-sm text-gray-600">Port Interfaces</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold" id="total-conflicts">-</div>
+                <div class="text-sm text-gray-600">IP Conflicts</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow">
+                <div class="text-2xl font-bold" id="unique-ips">-</div>
+                <div class="text-sm text-gray-600">Unique IPs</div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="mb-6">
+            <button onclick="loadData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                <i class="fas fa-sync-alt mr-2"></i>Load Data
+            </button>
+            <button onclick="showDebug()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 ml-2">
+                <i class="fas fa-bug mr-2"></i>Show Debug
+            </button>
+        </div>
+
+        <!-- IP Distribution -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">IP Distribution by Subnet</h2>
+            <div id="ip-distribution" class="space-y-2">
+                <div class="text-center py-4 text-gray-500">Click "Load Data" to begin</div>
+            </div>
+        </div>
+
+        <!-- Debug Panel -->
+        <div id="debug-panel" class="mt-6 bg-gray-100 p-4 rounded-lg" style="display: none;">
+            <h3 class="font-semibold mb-2">Debug Information</h3>
+            <pre id="debug-output" class="text-sm"></pre>
+        </div>
+    </div>
+
+    <script>
+        let systemData = {
+            portIPs: {},
+            conflicts: {},
+            stats: {}
+        };
+
+        async function loadData() {
+            try {
+                console.log('🔄 Loading data...');
+                document.getElementById('ip-distribution').innerHTML = `
+                    <div class="text-center py-4 text-blue-500">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>Loading...
+                    </div>
+                `;
+
+                // Load APIs
+                const portResponse = await fetch('/api/ipam/port-ips');
+                const conflictsResponse = await fetch('/api/ipam/ip-conflicts');
+                const statsResponse = await fetch('/api/ipam/stats');
+
+                console.log('📊 API responses:', {
+                    port: portResponse.status,
+                    conflicts: conflictsResponse.status,
+                    stats: statsResponse.status
+                });
+
+                systemData.portIPs = await portResponse.json();
+                systemData.conflicts = await conflictsResponse.json();
+                systemData.stats = await statsResponse.json();
+
+                console.log('✅ Data loaded:', {
+                    portIPs: Object.keys(systemData.portIPs).length,
+                    conflicts: systemData.conflicts.total_conflicts,
+                    stats: systemData.stats.total_devices
+                });
+
+                updateStats();
+                updateDistribution();
+
+            } catch (error) {
+                console.error('❌ Error:', error);
+                document.getElementById('ip-distribution').innerHTML = `
+                    <div class="text-center py-4 text-red-500">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function updateStats() {
+            const portData = systemData.portIPs || {};
+            const conflicts = systemData.conflicts || { total_conflicts: 0 };
+            
+            const totalSubnets = Object.keys(portData).length;
+            const totalInterfaces = Object.values(portData).reduce((sum, subnet) => sum + (subnet.total_ips || 0), 0);
+            const totalConflicts = conflicts.total_conflicts || 0;
+            const uniqueIPs = Object.values(portData).reduce((sum, subnet) => sum + (subnet.total_devices || 0), 0);
+
+            document.getElementById('total-subnets').textContent = totalSubnets.toLocaleString();
+            document.getElementById('total-interfaces').textContent = totalInterfaces.toLocaleString();
+            document.getElementById('total-conflicts').textContent = totalConflicts.toLocaleString();
+            document.getElementById('unique-ips').textContent = uniqueIPs.toLocaleString();
+        }
+
+        function updateDistribution() {
+            const portData = systemData.portIPs || {};
+            
+            if (Object.keys(portData).length === 0) {
+                document.getElementById('ip-distribution').innerHTML = `
+                    <div class="text-center py-4 text-gray-500">No data available</div>
+                `;
+                return;
+            }
+
+            const html = Object.entries(portData)
+                .slice(0, 10)
+                .map(([subnet, data]) => `
+                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                        <span class="font-mono text-sm">${subnet}</span>
+                        <div class="text-right">
+                            <div class="text-sm font-medium text-blue-600">${(data.total_ips || 0).toLocaleString()} IPs</div>
+                            <div class="text-xs text-gray-500">${(data.total_devices || 0).toLocaleString()} devices</div>
+                        </div>
+                    </div>
+                `).join('');
+
+            document.getElementById('ip-distribution').innerHTML = html;
+        }
+
+        function showDebug() {
+            const panel = document.getElementById('debug-panel');
+            const output = document.getElementById('debug-output');
+            
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            
+            output.textContent = JSON.stringify({
+                systemData: {
+                    portIPsKeys: Object.keys(systemData.portIPs),
+                    portIPsLength: Object.keys(systemData.portIPs).length,
+                    conflictsCount: systemData.conflicts.total_conflicts,
+                    statsDevices: systemData.stats.total_devices
+                },
+                sampleData: Object.entries(systemData.portIPs).slice(0, 2)
+            }, null, 2);
+        }
+
+        // Auto-load on page ready
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Simple IPAM test page loaded');
+        });
+    </script>
+</body>
+</html>

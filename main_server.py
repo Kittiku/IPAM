@@ -224,11 +224,25 @@ def get_port_ips():
     try:
         if db_manager:
             analysis = db_manager.get_port_analysis()
+            # Convert to format expected by frontend
+            if 'subnets' in analysis:
+                result = {}
+                for subnet_data in analysis['subnets']:
+                    subnet = subnet_data['subnet']
+                    result[subnet] = {
+                        'total_ips': subnet_data['ip_count'],
+                        'total_devices': subnet_data['device_count'],
+                        'unique_ips': [],  # Could be populated later
+                        'duplicate_ips': {}  # Could be populated later
+                    }
+                return jsonify(result)
+            else:
+                return jsonify(analysis)
         else:
             # Fallback analysis for CSV
             analysis = analyze_port_ips() if 'port_data' in globals() else {}
+            return jsonify(analysis)
         
-        return jsonify(analysis)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -247,22 +261,26 @@ def analyze_port_ips():
             subnet = str(ipaddress.IPv4Network(f"{ip}/24", strict=False))
             
             if subnet not in subnets:
-                subnets[subnet] = {'ip_count': 0, 'device_count': 0}
+                subnets[subnet] = {
+                    'total_ips': 0, 
+                    'total_devices': 0,
+                    'unique_ips': [],
+                    'duplicate_ips': {}
+                }
             
-            subnets[subnet]['ip_count'] += 1
+            subnets[subnet]['total_ips'] += 1
+            subnets[subnet]['unique_ips'].append(str(ip))
         except:
             continue
     
-    # Convert to list format
-    subnet_list = []
-    for subnet, data in list(subnets.items())[:20]:  # Limit to 20
-        subnet_list.append({
-            'subnet': subnet,
-            'ip_count': data['ip_count'],
-            'device_count': data['device_count']
-        })
+    # Update device counts and remove duplicates
+    for subnet in subnets:
+        subnets[subnet]['unique_ips'] = list(set(subnets[subnet]['unique_ips']))
+        subnets[subnet]['total_devices'] = len(subnets[subnet]['unique_ips'])
     
-    return {'subnets': subnet_list}
+    # Return only top 20 subnets
+    sorted_subnets = sorted(subnets.items(), key=lambda x: x[1]['total_ips'], reverse=True)[:20]
+    return dict(sorted_subnets)
 
 @app.route('/api/ipam/refresh-cache')
 def refresh_cache():
